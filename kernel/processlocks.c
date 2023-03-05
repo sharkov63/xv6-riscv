@@ -35,6 +35,8 @@ void processlocks_init() {
 
 int processlocks_allocate() {
   for (int id = 0; id < MAX_PROCESS_LOCKS; ++id) {
+    if (allocated[id])
+      continue;
     struct sleeplock *sleeplk = &sleeplocks[id];
     acquire(&sleeplk->lk);
     if (!allocated[id]) {
