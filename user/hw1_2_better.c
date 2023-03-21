@@ -104,6 +104,7 @@ int main(int argc, char **argv) {
 
   int fork_pid = fork();
   if (fork_pid < 0) {
+    process_lock(SYS_PROCESS_LOCK_FREE, mutex);
     close_two_end_pipe(&pipe);
     fatal_error("unable to fork");
   } else if (fork_pid == 0) {
