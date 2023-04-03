@@ -1,7 +1,9 @@
 void dmesg_init();
 
-/// Append message \p str to diagnostic messages buffer.
+/// Append a message to diagnostic messages buffer.
+/// Should be called only by kernel.
 ///
-/// Should be called by kernel.
-void pr_msg(const char *str);
+/// Message is formatted just like printf.
+/// Supported specifiers are %d, %x, %p, %s.
+void pr_msg(const char *format, ...);
 

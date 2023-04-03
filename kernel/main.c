@@ -33,7 +33,7 @@ main()
     __sync_synchronize();
     dmesg_init(); // diagnostic messages 
     started = 1;
-    pr_msg("Kernel started!");
+    pr_msg("Kernel started %d, [%x], %p, %s, '%s';!", -3, 15, 0xf4, 0, "LOL");
   } else {
     while(started == 0)
       ;
