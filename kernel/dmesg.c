@@ -9,6 +9,8 @@
 
 #include "spinlock.h"
 
+#include "proc.h"
+
 #include "dmesg.h"
 
 #define DMESG_BUFFER_PAGES 10
@@ -203,15 +205,35 @@ void pr_msg(const char *format, ...) {
 /// Implementation of dmesg syscall
 ///
 uint64 sys_dmesg() {
-  acquire(&mutex);
+  uint64 user_out_addr;
+  argaddr(0, &user_out_addr);
+  int user_out_size;
+  argint(1, &user_out_size);
+  if (user_out_size <= 0)
+    return 0; // nothing to copy
+  pagetable_t pagetable = myproc()->pagetable;
+
+  uint64 ret = 0;
+
+#define append(src, _length)                                                   \
+  do {                                                                         \
+    uint64 length = _length;                                                   \
+    if (length >= user_out_size)                                               \
+      length = user_out_size - 1;                                              \
+    ret |= copyout(pagetable, user_out_addr, src, length);                     \
+    user_out_addr += length;                                                   \
+    user_out_size -= length;                                                   \
+  } while (0)
+
   if (head < tail) {
-    consolewrite(0, (uint64)head, tail - head + 1);
+    append(head, tail - head);
   } else {
-    consolewrite(0, (uint64)head, buffer_end - head);
-    consolewrite(0, (uint64)buffer, tail - buffer + 1);
+    append(head, buffer_end - head);
+    append(buffer, tail - buffer);
   }
-  release(&mutex);
-  return 0;
+  append("\0", 1);
+
+  return ret;
 }
 
 ///

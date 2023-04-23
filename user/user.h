@@ -22,7 +22,11 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
-int dmesg(void);
+
+/// Copies kernel dmesg buffer into given user buffer with limited size.
+/// \return 0 on success and a 0-terminated string is written to buffer.
+int dmesg(const char*, int);
+
 int dmesg_log_toggle(int, int);
 
 // ulib.c
