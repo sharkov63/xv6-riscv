@@ -9,7 +9,9 @@
 
 #include "spinlock.h"
 
-#define DMESG_BUFFER_PAGES 1
+#include "dmesg.h"
+
+#define DMESG_BUFFER_PAGES 10
 #define DMESG_BUFFER_SIZE (DMESG_BUFFER_PAGES * PGSIZE)
 
 extern int consolewrite(int user_src, uint64 src, int n);
@@ -26,29 +28,29 @@ static char buffer[DMESG_BUFFER_SIZE];
 static char const *buffer_end = buffer + DMESG_BUFFER_SIZE;
 static struct spinlock mutex; ///< lock for dmesg entities
 
+/// dmesg logging storage entities
+
+static int log_eventclass_limit_ticks[DMESG_LOG_EVENTCLASS_COUNT];
+
 ///
 /// dmesg methods.
 ///
 /// Must be called only when \p mutex is locked
 ///
 
-static void advance_head() {
-  ++head;
-  if (head == buffer_end)
-    head = 0;
-}
+#define ADVANCE(ptr)                                                           \
+  do {                                                                         \
+    ++ptr;                                                                     \
+    if (ptr == buffer_end)                                                     \
+      ptr = buffer;                                                            \
+  } while (0);
 
 static void append_char(char ch) {
-  if (tail < buffer_end - 1) {
-    *tail++ = ch;
-    *tail = '\0';
-    advance_head();
-  } else {
-    *tail = ch;
-    tail = buffer;
-    *tail = '\0';
-    head = tail + 1;
-  }
+  *tail = ch;
+  ADVANCE(tail);
+  *tail = '\0';
+  if (head == tail)
+    ADVANCE(head);
 }
 
 static void append_string(const char *str) {
@@ -92,28 +94,12 @@ static void append_ptr(uint64 ptr) {
   }
 }
 
-///
-/// Implementation of dmesg.h interface.
-///
-
-void dmesg_init() {
-  initlock(&mutex, "dmesg lock");
-  head = buffer;
-  tail = buffer;
-  *tail = '\0';
-}
-
-void pr_msg(const char *format, ...) {
-  acquire(&mutex);
+static void variadic_pr_msg(const char *format, va_list args) {
   append_string("[Time: ");
-  acquire(&tickslock);
   unsigned cur_ticks = ticks;
-  release(&tickslock);
   append_int(cur_ticks, 10);
   append_string(" ticks]: ");
 
-  va_list args;
-  va_start(args, format);
   while (*format) {
     if (*format != '%') {
       append_char(*format++);
@@ -150,9 +136,66 @@ void pr_msg(const char *format, ...) {
     }
     ++format;
   }
-  va_end(args);
 
   append_char('\n');
+}
+
+static int log_eventclass_is_enabled(enum dmesg_log_eventclass eventclass) {
+  int cur_ticks = ticks;
+  return cur_ticks <= log_eventclass_limit_ticks[eventclass];
+}
+
+#define INT_MAX (int)((1u << 31) - 1)
+#define INT_MIN (int)(-(1u << 31))
+
+static void log_eventclass_toggle_impl(enum dmesg_log_eventclass eventclass,
+                                       int duration_ticks) {
+  int limit_ticks = INT_MAX;
+  if (duration_ticks != 0) {
+    limit_ticks = ticks + duration_ticks;
+  }
+  log_eventclass_limit_ticks[eventclass] = limit_ticks;
+}
+
+///
+/// Implementation of dmesg.h interface.
+///
+
+void dmesg_init() {
+  initlock(&mutex, "dmesg lock");
+  head = buffer;
+  tail = buffer;
+  *tail = '\0';
+  for (int eventclass = 0; eventclass < DMESG_LOG_EVENTCLASS_COUNT;
+       ++eventclass)
+    log_eventclass_limit_ticks[eventclass] = 0;
+}
+
+void dmesg_log(enum dmesg_log_eventclass eventclass, const char *format, ...) {
+  acquire(&mutex);
+  if (!log_eventclass_is_enabled(eventclass))
+    goto release_lock;
+  va_list args;
+  va_start(args, format);
+  variadic_pr_msg(format, args);
+  va_end(args);
+release_lock:
+  release(&mutex);
+}
+
+void dmesg_log_eventclass_toggle(enum dmesg_log_eventclass eventclass,
+                                 int duration_ticks) {
+  acquire(&mutex);
+  log_eventclass_toggle_impl(eventclass, duration_ticks);
+  release(&mutex);
+}
+
+void pr_msg(const char *format, ...) {
+  acquire(&mutex);
+  va_list args;
+  va_start(args, format);
+  variadic_pr_msg(format, args);
+  va_end(args);
   release(&mutex);
 }
 
@@ -160,11 +203,24 @@ void pr_msg(const char *format, ...) {
 /// Implementation of dmesg syscall
 ///
 uint64 sys_dmesg() {
+  acquire(&mutex);
   if (head < tail) {
     consolewrite(0, (uint64)head, tail - head + 1);
   } else {
     consolewrite(0, (uint64)head, buffer_end - head);
     consolewrite(0, (uint64)buffer, tail - buffer + 1);
   }
+  release(&mutex);
+  return 0;
+}
+
+///
+/// Implementation of dmesg_log_toggle syscall
+///
+uint64 sys_dmesg_log_toggle() {
+  int eventclass, duration_ticks;
+  argint(0, &eventclass);
+  argint(1, &duration_ticks);
+  dmesg_log_eventclass_toggle(eventclass, duration_ticks);
   return 0;
 }

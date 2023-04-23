@@ -6,6 +6,8 @@
 #include "proc.h"
 #include "defs.h"
 
+#include "dmesg.h"
+
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -458,6 +460,9 @@ scheduler(void)
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
+        dmesg_log(DMESG_LOG_PROCSWITCH,
+            "Switched to process '%s' (pid %d)",
+            p->name, p->pid);
         p->state = RUNNING;
         c->proc = p;
         swtch(&c->context, &p->context);
