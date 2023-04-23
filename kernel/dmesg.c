@@ -32,23 +32,19 @@ static struct spinlock mutex; ///< lock for dmesg entities
 /// Must be called only when \p mutex is locked
 ///
 
-static void advance_head() {
-  ++head;
-  if (head == buffer_end)
-    head = 0;
-}
+#define ADVANCE(ptr)                                                           \
+  do {                                                                         \
+    ++ptr;                                                                     \
+    if (ptr == buffer_end)                                                     \
+      ptr = buffer;                                                            \
+  } while (0);
 
 static void append_char(char ch) {
-  if (tail < buffer_end - 1) {
-    *tail++ = ch;
-    *tail = '\0';
-    advance_head();
-  } else {
-    *tail = ch;
-    tail = buffer;
-    *tail = '\0';
-    head = tail + 1;
-  }
+  *tail = ch;
+  ADVANCE(tail);
+  *tail = '\0';
+  if (head == tail)
+    ADVANCE(head);
 }
 
 static void append_string(const char *str) {
@@ -106,9 +102,7 @@ void dmesg_init() {
 void pr_msg(const char *format, ...) {
   acquire(&mutex);
   append_string("[Time: ");
-  acquire(&tickslock);
   unsigned cur_ticks = ticks;
-  release(&tickslock);
   append_int(cur_ticks, 10);
   append_string(" ticks]: ");
 
