@@ -614,10 +614,10 @@ dirlink(struct inode *dp, char *name, uint inum)
 // If no name to remove, return 0.
 //
 // Examples:
-//   skipelem("a/bb/c", name) = "bb/c", setting name = "a"
-//   skipelem("///a//bb", name) = "bb", setting name = "a"
-//   skipelem("a", name) = "", setting name = "a"
-//   skipelem("", name) = skipelem("////", name) = 0
+//   fs_path_skipelem("a/bb/c", name) = "bb/c", setting name = "a"
+//   fs_path_skipelem("///a//bb", name) = "bb", setting name = "a"
+//   fs_path_skipelem("a", name) = "", setting name = "a"
+//   fs_path_skipelem("", name) = fs_path_skipelem("////", name) = 0
 //
 static char*
 skipelem(char *path, char *name)
@@ -642,6 +642,53 @@ skipelem(char *path, char *name)
   while(*path == '/')
     path++;
   return path;
+}
+
+#define NULL 0
+
+/// \pre Called inside a FS transaction.
+/// \pre inode \p current is referenced, but not locked.
+/// 
+/// Ownership of \p current inode reference is transferred to this function,
+/// and destroyed in it.
+static struct inode *evaluate_step(struct inode *current, const char *name) {
+  struct inode *next = NULL;
+  ilock(current);
+  if (current->type != T_DIR)
+    goto iunlockput_current;
+
+  next = dirlookup(current, (char *)name, NULL);
+
+iunlockput_current:
+  iunlockput(current);
+  return next;
+}
+
+/// \pre Called inside a FS transaction.
+/// \pre inode \p start_dir is referenced, but not locked.
+///
+/// Ownership of \p start_dir is transferred  to this function, and destroyed in it.
+///
+/// \param parent if \p parent != NULL, then the parent directory of returned file
+///               is written into \p *parent.
+///
+/// \return inode of the file at \p path (absolute or relative to \p start_dir),
+///         \p NULL on error.
+struct inode *FS_PATH_evaluate(struct inode *start_dir, const char *path,
+                               struct inode **parent) {
+  struct inode *current = start_dir; // move
+  if (path[0] == '/') {
+    iput(current);
+    current = iget(ROOTDEV, ROOTINO);
+  }
+  char name[DIRSIZ];
+  while ((path = skipelem((char *)path, name)) != 0) {
+    if (parent && !path[0])
+      *parent = idup(current);
+    if (!(current = evaluate_step(current, name)))
+      return 0;
+  }
+  return current;
 }
 
 // Look up and return the inode for a path name.
