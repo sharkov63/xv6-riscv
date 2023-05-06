@@ -301,6 +301,52 @@ create(char *path, short type, short major, short minor)
   return 0;
 }
 
+#define NULL 0
+
+/// \param link locked symlink inode
+/// \param path path to the symlink
+///
+/// \return locked inode of target file, \p NULL on error.
+static struct inode *reach_symlink_target(struct inode *link, const char *path) {
+  static const int JUMP_LIMIT = 10;
+  static char dummy[DIRSIZ];
+  struct inode *parent = nameiparent((char *)path, dummy);
+  if (!parent) {
+    iunlockput(link);
+    return NULL;
+  }
+  for (int jump = 0; jump < JUMP_LIMIT; ++jump) {
+    if (link->type == T_FILE) {
+      iput(parent);
+      return link;
+    }
+    if (link->type != T_SYMLINK)
+      goto fail;
+    char target[MAXPATH];
+    if (readi(link,
+              0 /* kernel dest */,
+              (uint64)&target,
+              /* off = */ 0,
+              sizeof target) <= 0) {
+      goto fail;
+    }
+    iunlockput(link);
+    struct inode *new_parent;
+    link = FS_PATH_evaluate(parent, target, &new_parent);
+    parent = new_parent; // move
+    if (!link) {
+      if (parent)
+        iput(parent);
+      return NULL;
+    }
+    ilock(link);
+  }
+fail:
+  iput(parent);
+  iunlockput(link);
+  return NULL;
+}
+
 uint64
 sys_open(void)
 {
@@ -328,7 +374,7 @@ sys_open(void)
       return -1;
     }
     ilock(ip);
-    if(ip->type == T_DIR && omode != O_RDONLY){
+    if(ip->type == T_DIR && (omode & ~O_NOFOLLOW) != O_RDONLY){
       iunlockput(ip);
       end_op();
       return -1;
@@ -339,6 +385,13 @@ sys_open(void)
     iunlockput(ip);
     end_op();
     return -1;
+  }
+
+  if (ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)) {
+    if (!(ip = reach_symlink_target(ip, path))) {
+      end_op();
+      return -1;
+    } 
   }
 
   if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){

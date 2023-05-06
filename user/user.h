@@ -23,6 +23,22 @@ char* sbrk(int);
 int sleep(int);
 int uptime(void);
 
+/// Creates a symlink at \p linkpath which points to \p target.
+///
+/// \param target  path to target file, which is relative to
+///                the parent directory of \p linkpath.
+/// \param linkpath path to the symlink to create.
+///
+/// \return 0 on success, non-zero value on error.
+int symlink(const char *target, const char *linkpath);
+
+/// Reads target of symlink at \p linkpath into user buffer \p buf.
+///
+/// \pre \p buf must be at least \p MAXPATH bytes.
+///
+/// \return 0 on success, non-zero value on error.
+int readlink(const char *linkpath, char *buf);
+
 // ulib.c
 int stat(const char*, struct stat*);
 char* strcpy(char*, const char*);
