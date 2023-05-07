@@ -225,6 +225,8 @@ uint64 sys_dmesg() {
     user_out_size -= length;                                                   \
   } while (0)
 
+  acquire(&mutex);
+
   if (head < tail) {
     append(head, tail - head);
   } else {
@@ -232,6 +234,8 @@ uint64 sys_dmesg() {
     append(buffer, tail - buffer);
   }
   append("\0", 1);
+
+  release(&mutex);
 
   return ret;
 }
