@@ -374,8 +374,10 @@ iunlockput(struct inode *ip)
 // The content (data) associated with each inode is stored
 // in blocks on the disk. The first NDIRECT block numbers
 // are listed in ip->addrs[].  The next NINDIRECT blocks are
-// listed in block ip->addrs[NDIRECT].
-
+// listed in block ip->addrs[NDIRECT]. The next NDBLINDIRECT blocks
+// are listed in the next NINDIRECT blocks, which in turn are listed
+// in block ip->addrs[NDIRECT + 1]
+//
 // Return the disk block address of the nth block in inode ip.
 // If there is no such block, bmap allocates one.
 // returns 0 if out of disk space.
@@ -416,6 +418,36 @@ bmap(struct inode *ip, uint bn)
     brelse(bp);
     return addr;
   }
+  bn -= NINDIRECT;
+
+  if (bn < NDBLINDIRECT) {
+    uint *root_addr = &ip->addrs[NDIRECT + 1];
+    if (*root_addr == 0) {
+      *root_addr = balloc(ip->dev);
+      if (*root_addr == 0)
+        return 0;
+    }
+    struct buf *root = bread(ip->dev, *root_addr);
+    uint *mid_addr = ((uint*)root->data) + (bn / NINDIRECT);
+    if (*mid_addr == 0) {
+      *mid_addr = balloc(ip->dev);
+      if (*mid_addr == 0) {
+        brelse(root);
+        return 0;
+      }
+      log_write(root);
+    }
+    struct buf *mid = bread(ip->dev, *mid_addr);
+    brelse(root);
+    uint *target_addr = ((uint*)mid->data) + (bn % NINDIRECT);
+    if (*target_addr == 0) {
+      *target_addr = balloc(ip->dev);
+      if (*target_addr) 
+        log_write(mid);
+    }
+    brelse(mid);
+    return *target_addr;
+  }
 
   panic("bmap: out of range");
 }
@@ -446,6 +478,27 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
+  }
+
+  uint *root_addr = &ip->addrs[NDIRECT + 1];
+  if (*root_addr) {
+    struct buf *root = bread(ip->dev, *root_addr);
+    uint *root_data = (uint *)root->data;
+    for (uint *mid_addr = root_data; mid_addr < root_data + NDIRECT; ++mid_addr) {
+      if (*mid_addr == 0)
+        continue;
+      struct buf *mid = bread(ip->dev, *mid_addr);
+      uint *mid_data = (uint *)mid->data;
+      for (int target_block = 0; target_block < NDIRECT; ++target_block) {
+        if (mid_data[target_block])
+          bfree(ip->dev, mid_data[target_block]);
+      }
+      brelse(mid);
+      bfree(ip->dev, *mid_addr);
+    }
+    brelse(root);
+    bfree(ip->dev, *root_addr);
+    *root_addr = 0;
   }
 
   ip->size = 0;
