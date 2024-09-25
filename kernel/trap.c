@@ -6,6 +6,8 @@
 #include "proc.h"
 #include "defs.h"
 
+#include "dmesg.h"
+
 struct spinlock tickslock;
 uint ticks;
 
@@ -185,6 +187,8 @@ devintr()
 
     // irq indicates which device interrupted.
     int irq = plic_claim();
+
+    dmesg_log(DMESG_LOG_INTERRUPT, "Interrupted with device %d", irq);
 
     if(irq == UART0_IRQ){
       uartintr();
